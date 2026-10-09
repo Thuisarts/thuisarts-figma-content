@@ -25,7 +25,7 @@
 <div class="wrap">
   <details id="instellingen">
     <summary>Instellingen</summary>
-    <input id="proxy" placeholder="https://thuisarts-proxy.jouwnaam.workers.dev">
+    <input id="proxy" placeholder="https://thuisarts-figma-content-proxy.vercel.app">
   </details>
   <div class="rij">
     <input id="zoek" placeholder="Zoek een pagina, bijv. buikpijn">
@@ -48,6 +48,8 @@
 </div>
 
 <script>
+// De proxy van het Thuisarts-ontwerpteam. Een ander adres kan bij Instellingen.
+const STANDAARD_PROXY = 'https://thuisarts-figma-content-proxy.vercel.app';
 const SITEMAPS = ['https://www.thuisarts.nl/sitemap.xml?page=1', 'https://www.thuisarts.nl/sitemap.xml?page=2'];
 // Pagina's die geen gezondheidscontent zijn, laten we weg uit de lijst.
 const OVERSLAAN = /^\/(privacy|gebruiksvoorwaarden|contact|over-thuisarts|colofon|disclaimer|zoeken|search|user|node|taxonomy|deel-via-email)/;
@@ -67,7 +69,8 @@ window.onmessage = async function (e) {
   if (!msg) return;
   if (msg.type === 'instellingen') {
     instellingen = msg.instellingen;
-    $('proxy').value = instellingen.proxy || '';
+    if (!instellingen.proxy) instellingen.proxy = STANDAARD_PROXY;
+    $('proxy').value = instellingen.proxy;
     // Toon de bewaarde paginalijst meteen; ververs hem op de achtergrond als hij ouder is dan een dag.
     if (msg.sitemap && msg.sitemap.urls && msg.sitemap.urls.length) {
       zetUrls(msg.sitemap.urls);
@@ -83,7 +86,8 @@ window.onmessage = async function (e) {
 };
 
 $('proxy').addEventListener('change', function () {
-  instellingen.proxy = $('proxy').value.trim().replace(/\/+$/, '');
+  instellingen.proxy = $('proxy').value.trim().replace(/\/+$/, '') || STANDAARD_PROXY;
+  $('proxy').value = instellingen.proxy;
   stuur({ type: 'bewaar-instellingen', instellingen: instellingen });
   laadSitemap(false);
 });
