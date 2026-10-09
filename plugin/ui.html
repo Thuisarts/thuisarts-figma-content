@@ -1,0 +1,324 @@
+<style>
+  :root { --bg: var(--figma-color-bg, #fff); --tekst: var(--figma-color-text, #222); --zacht: var(--figma-color-text-secondary, #666);
+          --rand: var(--figma-color-border, #e5e5e5); --accent: #023729; --accent-tekst: #fff; --hover: var(--figma-color-bg-hover, #f2f2f2); }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 12px/1.4 Inter, system-ui, sans-serif; color: var(--tekst); background: var(--bg); }
+  .wrap { display: flex; flex-direction: column; height: 100vh; padding: 12px; gap: 8px; }
+  input, select { width: 100%; padding: 6px 8px; border: 1px solid var(--rand); border-radius: 6px; background: var(--bg); color: var(--tekst); font: inherit; }
+  .rij { display: flex; gap: 6px; }
+  .rij > * { flex: 1; }
+  button { padding: 7px 8px; border-radius: 6px; border: 1px solid var(--rand); background: var(--bg); color: var(--tekst); font: inherit; font-weight: 600; cursor: pointer; }
+  button.primair { background: var(--accent); color: var(--accent-tekst); border-color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  #lijst { flex: 1; overflow: auto; border: 1px solid var(--rand); border-radius: 6px; margin: 0; padding: 0; list-style: none; }
+  #lijst li { padding: 6px 8px; cursor: pointer; border-bottom: 1px solid var(--rand); }
+  #lijst li:hover { background: var(--hover); }
+  #lijst li.actief { background: var(--accent); color: var(--accent-tekst); }
+  #lijst li small { display: block; opacity: .7; }
+  #voorbeeld { max-height: 130px; overflow: auto; padding: 8px; border: 1px dashed var(--rand); border-radius: 6px; color: var(--zacht); }
+  #voorbeeld b { color: var(--tekst); }
+  #status { min-height: 16px; color: var(--zacht); }
+  details summary { cursor: pointer; color: var(--zacht); }
+  details input { margin-top: 6px; }
+</style>
+
+<div class="wrap">
+  <details id="instellingen">
+    <summary>Instellingen</summary>
+    <input id="proxy" placeholder="https://thuisarts-proxy.jouwnaam.workers.dev">
+  </details>
+  <div class="rij">
+    <input id="zoek" placeholder="Zoek een pagina, bijv. buikpijn">
+  </div>
+  <div class="rij">
+    <select id="soort">
+      <option value="alles">Alle pagina's</option>
+      <option value="situatie" selected>Situaties (met secties)</option>
+      <option value="onderwerp">Onderwerpen</option>
+    </select>
+  </div>
+  <ul id="lijst"></ul>
+  <div id="voorbeeld">Kies een pagina om de content te zien.</div>
+  <div class="rij">
+    <button id="vul" class="primair" disabled>Vul selectie</button>
+    <button id="shuffle">Shuffle</button>
+  </div>
+  <button id="kaart">Maak voorbeeldkaart</button>
+  <div id="status"></div>
+</div>
+
+<script>
+const SITEMAPS = ['https://www.thuisarts.nl/sitemap.xml?page=1', 'https://www.thuisarts.nl/sitemap.xml?page=2'];
+// Pagina's die geen gezondheidscontent zijn, laten we weg uit de lijst.
+const OVERSLAAN = /^\/(privacy|gebruiksvoorwaarden|contact|over-thuisarts|colofon|disclaimer|zoeken|search|user|node|taxonomy|deel-via-email)/;
+
+let instellingen = {};
+let alleUrls = [];       // { url, pad, titel, soort }
+let gekozen = null;      // url van de geselecteerde pagina
+let gekozenPagina = null; // uitgelezen content
+const cache = new Map();
+
+const $ = function (id) { return document.getElementById(id); };
+function status(t) { $('status').textContent = t || ''; }
+function stuur(msg) { parent.postMessage({ pluginMessage: msg }, '*'); }
+
+window.onmessage = async function (e) {
+  const msg = e.data.pluginMessage;
+  if (!msg) return;
+  if (msg.type === 'instellingen') {
+    instellingen = msg.instellingen;
+    $('proxy').value = instellingen.proxy || '';
+    if (!instellingen.proxy) { $('instellingen').open = true; status('Vul eerst het adres van de proxy in.'); }
+    else laadSitemap();
+  } else if (msg.type === 'selectie-aantal' && msg.verzoek === 'shuffle') {
+    await shuffle(msg.aantal);
+  } else if (msg.type === 'klaar') {
+    zetBezig(false);
+  }
+};
+
+$('proxy').addEventListener('change', function () {
+  instellingen.proxy = $('proxy').value.trim().replace(/\/+$/, '');
+  stuur({ type: 'bewaar-instellingen', instellingen: instellingen });
+  laadSitemap();
+});
+
+function viaProxy(url) {
+  if (!instellingen.proxy) throw new Error('Geen proxy ingesteld (zie Instellingen).');
+  const adres = new URL(instellingen.proxy);
+  adres.searchParams.set('url', url);
+  return adres.toString();
+}
+
+async function haal(url, als) {
+  const r = await fetch(viaProxy(url));
+  if (!r.ok) throw new Error('Ophalen mislukt (' + r.status + '): ' + url);
+  return { body: als === 'bytes' ? await r.arrayBuffer() : await r.text(), finalUrl: r.headers.get('X-Final-Url') || url };
+}
+
+// ---------- Sitemap ----------
+
+async function laadSitemap() {
+  status('Paginalijst laden…');
+  try {
+    const delen = await Promise.all(SITEMAPS.map(function (u) { return haal(u); }));
+    const urls = [];
+    for (const deel of delen) {
+      const xml = new DOMParser().parseFromString(deel.body, 'application/xml');
+      for (const loc of xml.getElementsByTagName('loc')) urls.push(loc.textContent.trim());
+    }
+    alleUrls = urls.map(naarItem).filter(function (i) { return i && !OVERSLAAN.test(i.pad); });
+    status(alleUrls.length + " pagina's gevonden.");
+    toonLijst();
+  } catch (e) {
+    status(e.message);
+  }
+}
+
+function naarItem(url) {
+  const pad = url.replace(/^https:\/\/www\.thuisarts\.nl/, '');
+  const delen = pad.split('/').filter(Boolean);
+  if (delen.length === 0) return null;
+  const slug = delen[delen.length - 1];
+  const titel = slug.charAt(0).toUpperCase() + slug.slice(1).replace(/-/g, ' ');
+  return { url: url, pad: pad, titel: titel, soort: delen.length === 1 ? 'onderwerp' : 'situatie' };
+}
+
+function gefilterd() {
+  const zoek = $('zoek').value.trim().toLowerCase();
+  const soort = $('soort').value;
+  return alleUrls.filter(function (i) {
+    return (soort === 'alles' || i.soort === soort) && (!zoek || i.pad.toLowerCase().indexOf(zoek.replace(/\s+/g, '-')) >= 0);
+  });
+}
+
+function toonLijst() {
+  const lijst = $('lijst');
+  lijst.innerHTML = '';
+  for (const item of gefilterd().slice(0, 200)) {
+    const li = document.createElement('li');
+    li.innerHTML = '<span></span><small></small>';
+    li.firstChild.textContent = item.titel;
+    li.lastChild.textContent = item.pad;
+    if (item.url === gekozen) li.className = 'actief';
+    li.onclick = function () { kies(item.url); };
+    lijst.appendChild(li);
+  }
+}
+$('zoek').addEventListener('input', toonLijst);
+$('soort').addEventListener('change', toonLijst);
+
+async function kies(url) {
+  gekozen = url;
+  toonLijst();
+  status('Pagina laden…');
+  try {
+    gekozenPagina = await laadPagina(url);
+    toonVoorbeeld(gekozenPagina);
+    $('vul').disabled = false;
+    status('');
+  } catch (e) {
+    status(e.message);
+  }
+}
+
+function toonVoorbeeld(p) {
+  const v = $('voorbeeld');
+  v.innerHTML = '';
+  const regel = function (label, tekst) {
+    if (!tekst) return;
+    const d = document.createElement('div');
+    d.innerHTML = '<b></b> <span></span>';
+    d.firstChild.textContent = label;
+    d.lastChild.textContent = tekst.length > 140 ? tekst.slice(0, 140) + '…' : tekst;
+    v.appendChild(d);
+  };
+  regel('#titel', p.titel);
+  regel('#onderwerp', p.onderwerp);
+  regel('#intro', p.intro);
+  p.secties.forEach(function (s, i) { regel('#kop-' + (i + 1), s.kop); });
+  p.situaties.forEach(function (s, i) { regel('#situatie-' + (i + 1), s); });
+  regel('#afbeelding', p.afbeelding ? 'ja' : 'geen');
+}
+
+// ---------- Pagina uitlezen ----------
+
+async function laadPagina(url) {
+  if (cache.has(url)) return cache.get(url);
+  const res = await haal(url);
+  const pagina = leesPagina(res.body, res.finalUrl);
+  if (pagina.afbeeldingUrl) {
+    try { pagina.afbeelding = await naarPng((await haal(pagina.afbeeldingUrl, 'bytes')).body); }
+    catch (e) { pagina.afbeelding = null; }
+  }
+  cache.set(url, pagina);
+  return pagina;
+}
+
+function schoon(t) {
+  return (t || '').replace(/ /g, ' ').replace(/[ \t]+/g, ' ').replace(/ *\n */g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
+// Zet een tekstblok om naar platte tekst: alinea's gescheiden door een witregel, lijstjes met bolletjes.
+// Witruimte uit de HTML-broncode telt niet mee; alleen blokelementen geven een nieuwe regel.
+const NL = '\u0001';
+function tekstVan(el) {
+  if (!el) return '';
+  const kloon = el.cloneNode(true);
+  kloon.querySelectorAll('svg, script, style, .visually-hidden, [class*="video"], [class*="transcript"]').forEach(function (n) { n.remove(); });
+  kloon.querySelectorAll('br').forEach(function (n) { n.replaceWith(NL); });
+  kloon.querySelectorAll('ol').forEach(function (ol) {
+    ol.querySelectorAll(':scope > li').forEach(function (li, i) { li.prepend((i + 1) + '. '); });
+  });
+  kloon.querySelectorAll('ul > li').forEach(function (li) { li.prepend('• '); });
+  kloon.querySelectorAll('li').forEach(function (n) { n.append(NL); });
+  kloon.querySelectorAll('p, h2, h3, h4, h5, ul, ol, div, table, blockquote').forEach(function (n) { n.append(NL + NL); });
+  return kloon.textContent
+    .replace(/\s+/g, ' ')
+    .replace(/ *\u0001 */g, NL)
+    .replace(/\u0001{3,}/g, NL + NL)
+    .replace(/\u0001/g, '\n')
+    .trim();
+}
+
+function leesPagina(html, url) {
+  const doc = new DOMParser().parseFromString(html, 'text/html');
+  const tekst = function (sel) { const el = doc.querySelector(sel); return el ? schoon(el.textContent) : ''; };
+  const meta = function (sel) { const el = doc.querySelector(sel); return el ? schoon(el.getAttribute('content')) : ''; };
+
+  const titel = tekst('main h1.page-title') || tekst('main h1') || meta('meta[property="og:title"]');
+  const onderwerp = tekst('main .breadcrumb__label') || titel;
+
+  const secties = [];
+  for (const blok of doc.querySelectorAll('main .toc-content-block')) {
+    const kop = blok.querySelector('.taxonomy-title__text');
+    const body = blok.querySelector('.text-formatted');
+    if (kop && body) secties.push({ kop: schoon(kop.textContent), tekst: tekstVan(body) });
+  }
+
+  const situaties = [];
+  for (const a of doc.querySelectorAll('main .link-group__link-list .link-with-icon__text')) situaties.push(schoon(a.textContent));
+
+  let intro = tekstVan(doc.querySelector('main .subject-summary .text-formatted'));
+  if (secties.length && /in het kort/i.test(secties[0].kop)) {
+    if (!intro) intro = secties[0].tekst;
+    secties.shift();
+  }
+  if (!intro) intro = meta('meta[name="description"]');
+
+  return { url: url, titel: titel, onderwerp: onderwerp, intro: intro, secties: secties, situaties: situaties, afbeeldingUrl: zoekAfbeelding(doc, url) };
+}
+
+function zoekAfbeelding(doc, url) {
+  const picture = doc.querySelector('main .media--type-image picture') || doc.querySelector('main picture');
+  if (picture) {
+    // Neem de grootste variant uit de srcset van de desktopbron (2x).
+    const bron = picture.querySelector('source[srcset]');
+    if (bron) {
+      const kandidaten = bron.getAttribute('srcset').split(',').map(function (s) { return s.trim().split(/\s+/)[0]; });
+      return new URL(kandidaten[kandidaten.length - 1], url).toString();
+    }
+    const img = picture.querySelector('img[src]');
+    if (img) return new URL(img.getAttribute('src'), url).toString();
+  }
+  // Geen eigen afbeelding: de og:image is dan het algemene Thuisarts-logo, dat slaan we over.
+  const og = doc.querySelector('meta[property="og:image"]');
+  if (!og || /social-image/.test(og.getAttribute('content'))) return null;
+  return new URL(og.getAttribute('content'), url).toString();
+}
+
+// Figma accepteert geen WebP, dus de browser zet de afbeelding om naar PNG.
+async function naarPng(buffer) {
+  const bitmap = await createImageBitmap(new Blob([buffer]));
+  const canvas = document.createElement('canvas');
+  canvas.width = bitmap.width;
+  canvas.height = bitmap.height;
+  canvas.getContext('2d').drawImage(bitmap, 0, 0);
+  const blob = await new Promise(function (ok) { canvas.toBlob(ok, 'image/png'); });
+  return new Uint8Array(await blob.arrayBuffer());
+}
+
+// ---------- Acties ----------
+
+function zetBezig(bezig) {
+  for (const id of ['vul', 'shuffle', 'kaart']) $(id).disabled = bezig || (id === 'vul' && !gekozenPagina);
+  if (!bezig) status('');
+}
+
+$('vul').onclick = function () {
+  if (!gekozenPagina) return;
+  zetBezig(true);
+  stuur({ type: 'vul-selectie', paginas: [gekozenPagina] });
+};
+
+$('kaart').onclick = function () {
+  zetBezig(true);
+  stuur({ type: 'maak-voorbeeldkaart', pagina: gekozenPagina });
+};
+
+$('shuffle').onclick = function () {
+  if (!alleUrls.length) { status('De paginalijst is nog niet geladen.'); return; }
+  stuur({ type: 'tel-selectie', verzoek: 'shuffle' });
+};
+
+// Elke geselecteerde laag krijgt een andere willekeurige pagina uit de huidige lijst (zoekterm en soort tellen mee).
+async function shuffle(aantal) {
+  if (aantal === 0) { stuur({ type: 'melding', tekst: 'Selecteer eerst een of meer frames.' }); return; }
+  const kandidaten = gefilterd().slice();
+  if (!kandidaten.length) { status('Geen pagina\'s die bij je zoekterm passen.'); return; }
+  zetBezig(true);
+  const paginas = [];
+  try {
+    for (let i = 0; i < aantal; i++) {
+      status('Pagina ' + (i + 1) + ' van ' + aantal + ' laden…');
+      const idx = Math.floor(Math.random() * kandidaten.length);
+      const item = kandidaten.length > 1 ? kandidaten.splice(idx, 1)[0] : kandidaten[0];
+      paginas.push(await laadPagina(item.url));
+    }
+    stuur({ type: 'vul-selectie', paginas: paginas });
+  } catch (e) {
+    status(e.message);
+    zetBezig(false);
+  }
+}
+</script>
