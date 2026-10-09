@@ -62,7 +62,7 @@ Genummerde lagen zonder content (bijv. `#kop-6` bij een pagina met 4 secties) wo
 
 ## Goed om te weten
 
-- De paginalijst komt uit de sitemap (ongeveer 2.450 pagina's). De namen in de lijst zijn afgeleid van het webadres; de echte titel zie je zodra je een pagina kiest.
+- De paginalijst staat in `proxy/public/paginas.json` en wordt elke maandag door GitHub Actions bijgewerkt uit de sitemap (ongeveer 2.450 pagina's). thuisarts.nl geeft de sitemap niet altijd aan Vercel, vandaar dit vaste bestand. Is het er niet (bijv. op Cloudflare), dan haalt de plugin de sitemap live op. De namen in de lijst zijn afgeleid van het webadres; de echte titel zie je zodra je een pagina kiest.
 - Pagina's zonder eigen afbeelding laten `#afbeelding` ongemoeid.
 - Het uitlezen gaat op de HTML-classes van de site (`page-title`, `toc-content-block`, `subject-summary`). Verandert het webteam die, dan moet de plugin mee.
 - De proxy bewaart antwoorden een uur in de cache, dus een net aangepaste pagina kan even op zich laten wachten.

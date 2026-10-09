@@ -121,10 +121,34 @@ async function haal(url, als) {
 
 // ---------- Sitemap ----------
 
-// De sitemap bestaat uit twee delen. Elk deel komt in de lijst zodra het binnen is.
+// Eerst de vaste paginalijst die naast de proxy staat (paginas.json, wekelijks bijgewerkt door GitHub).
+// Lukt dat niet, dan de sitemap van thuisarts.nl via de proxy.
+async function laadPaginalijst() {
+  const stop = new AbortController();
+  const timer = setTimeout(function () { stop.abort(); }, TIMEOUT_MS);
+  try {
+    const r = await fetch(new URL('/paginas.json', instellingen.proxy).toString(), { signal: stop.signal });
+    if (!r.ok) return null;
+    const data = await r.json();
+    return data && data.urls && data.urls.length ? data.urls : null;
+  } catch (e) {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 async function laadSitemap(opAchtergrond) {
   const start = Date.now();
   if (!opAchtergrond) status('Paginalijst laden…');
+  const vast = await laadPaginalijst();
+  if (vast) {
+    zetUrls(vast);
+    stuur({ type: 'bewaar-sitemap', sitemap: { tijd: Date.now(), urls: vast } });
+    status(alleUrls.length + " pagina's gevonden (" + ((Date.now() - start) / 1000).toFixed(1) + ' s).');
+    return;
+  }
+  // De sitemap bestaat uit twee delen. Elk deel komt in de lijst zodra het binnen is.
   const urls = [];
   const fouten = [];
   await Promise.all(SITEMAPS.map(async function (u) {
