@@ -10,14 +10,18 @@
 
 figma.showUI(__html__, { width: 360, height: 560, themeColors: true });
 
-figma.clientStorage.getAsync('instellingen').then(function (instellingen) {
-  figma.ui.postMessage({ type: 'instellingen', instellingen: instellingen || {} });
+Promise.all([figma.clientStorage.getAsync('instellingen'), figma.clientStorage.getAsync('sitemap')]).then(function (r) {
+  figma.ui.postMessage({ type: 'instellingen', instellingen: r[0] || {}, sitemap: r[1] || null });
 });
 
 figma.ui.onmessage = async function (msg) {
   try {
     if (msg.type === 'bewaar-instellingen') {
       await figma.clientStorage.setAsync('instellingen', msg.instellingen);
+      return;
+    } else if (msg.type === 'bewaar-sitemap') {
+      await figma.clientStorage.setAsync('sitemap', msg.sitemap);
+      return;
     } else if (msg.type === 'tel-selectie') {
       figma.ui.postMessage({ type: 'selectie-aantal', aantal: figma.currentPage.selection.length, verzoek: msg.verzoek });
     } else if (msg.type === 'vul-selectie') {
