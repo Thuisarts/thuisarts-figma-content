@@ -7,7 +7,7 @@
   "editorType": ["figma"],
   "documentAccess": "dynamic-page",
   "networkAccess": {
-    "allowedDomains": ["https://*.workers.dev", "https://*.vercel.app"],
+    "allowedDomains": ["https://thuisarts-figma-content-proxy.vercel.app", "https://*.vercel.app", "https://*.workers.dev"],
     "reasoning": "Haalt content van thuisarts.nl op via de eigen Thuisarts-proxy (Cloudflare Worker of Vercel)."
   }
 }

@@ -34,7 +34,7 @@ Test (beide varianten): open `<jouw adres>/?url=https://www.thuisarts.nl/buikpij
 1. Open de **Figma desktop-app** (plugins in ontwikkeling werken niet in de browser).
 2. Menu **Plugins** → **Development** → **Import plugin from manifest…** en kies `plugin/manifest.json`.
 3. Start de plugin via **Plugins** → **Development** → **Thuisarts content**.
-4. Plak bij **Instellingen** het adres van je proxy. Dit hoef je maar één keer te doen.
+4. De plugin gebruikt standaard de proxy van het ontwerpteam (`https://thuisarts-figma-content-proxy.vercel.app`). Een eigen proxy vul je in bij **Instellingen**; leeg laten zet hem terug naar de standaard.
 
 Gebruikt de proxy een eigen domein in plaats van `*.workers.dev` of `*.vercel.app`? Voeg dat dan toe aan `allowedDomains` in `manifest.json`.
 
