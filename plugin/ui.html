@@ -106,7 +106,9 @@ async function haal(url, als) {
     if (r.status >= 500) r = await fetch(viaProxy(url), { signal: stop.signal });
     if (!r.ok) {
       const bron = r.headers.get('X-Upstream-Status') ? 'thuisarts.nl gaf ' + r.headers.get('X-Upstream-Status') : 'de proxy gaf ' + r.status;
-      const uitleg = (await r.text().catch(function () { return ''; })).replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 160);
+      const ruw = await r.text().catch(function () { return ''; });
+      // Bij een HTML-foutpagina alleen de titel tonen, anders de platte tekst.
+      const uitleg = (/<html/i.test(ruw) ? (new DOMParser().parseFromString(ruw, 'text/html').title || '') : ruw).replace(/\s+/g, ' ').trim().slice(0, 160);
       throw new Error('Ophalen mislukt, ' + bron + ': ' + url + (uitleg ? ' (' + uitleg + ')' : ''));
     }
     return { body: als === 'bytes' ? await r.arrayBuffer() : await r.text(), finalUrl: r.headers.get('X-Final-Url') || url };
@@ -205,21 +207,41 @@ function toonLijst() {
     lijst.appendChild(li);
   }
 }
-$('zoek').addEventListener('input', toonLijst);
-$('soort').addEventListener('change', toonLijst);
+$('zoek').addEventListener('input', filterGewijzigd);
+$('soort').addEventListener('change', filterGewijzigd);
+
+// Zet de gekozen pagina terug naar "niets gekozen", zodat er nooit oude content blijft staan.
+function wisKeuze(tekst) {
+  gekozen = null;
+  gekozenPagina = null;
+  $('vul').disabled = true;
+  $('voorbeeld').textContent = tekst || 'Kies een pagina om de content te zien.';
+}
 
 async function kies(url) {
+  wisKeuze('Pagina laden…');
   gekozen = url;
   toonLijst();
   status('Pagina laden…');
   try {
-    gekozenPagina = await laadPagina(url);
-    toonVoorbeeld(gekozenPagina);
+    const pagina = await laadPagina(url);
+    if (gekozen !== url) return; // intussen een andere pagina gekozen
+    gekozenPagina = pagina;
+    toonVoorbeeld(pagina);
     $('vul').disabled = false;
     status('');
   } catch (e) {
+    if (gekozen !== url) return;
+    wisKeuze('Deze pagina kon niet geladen worden.');
+    toonLijst();
     status(e.message);
   }
+}
+
+// Bij een andere zoekterm of soort: valt de gekozen pagina buiten de lijst, dan de keuze wissen.
+function filterGewijzigd() {
+  if (gekozen && !gefilterd().some(function (i) { return i.url === gekozen; })) wisKeuze();
+  toonLijst();
 }
 
 function toonVoorbeeld(p) {
