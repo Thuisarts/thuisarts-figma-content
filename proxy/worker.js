@@ -30,20 +30,28 @@ export default {
       return fout(403, 'Alleen https://' + TOEGESTANE_HOST + ' is toegestaan');
     }
 
-    const antwoord = await fetch(doelUrl.toString(), {
-      headers: { 'User-Agent': 'Thuisarts-Figma-plugin (ontwerpteam)' },
-      redirect: 'follow',
-      cf: { cacheTtl: CACHE_SECONDEN, cacheEverything: true },
-    });
+    let antwoord, body;
+    try {
+      antwoord = await fetch(doelUrl.toString(), {
+        headers: { 'User-Agent': 'Thuisarts-Figma-plugin (ontwerpteam)' },
+        redirect: 'follow',
+        cf: { cacheTtl: CACHE_SECONDEN, cacheEverything: true },
+      });
+      // Eerst helemaal binnenhalen in plaats van doorstreamen: dat is betrouwbaarder op Vercel Edge.
+      body = await antwoord.arrayBuffer();
+    } catch (e) {
+      return fout(502, 'Proxy kon ' + doelUrl.toString() + ' niet ophalen: ' + (e && e.message ? e.message : e));
+    }
 
     const headers = new Headers(CORS);
     headers.set('Content-Type', antwoord.headers.get('Content-Type') || 'application/octet-stream');
-    headers.set('Cache-Control', 'public, max-age=' + CACHE_SECONDEN);
+    headers.set('Cache-Control', antwoord.ok ? 'public, max-age=' + CACHE_SECONDEN : 'no-store');
     // Het uiteindelijke adres na redirects, zodat de plugin relatieve links goed kan oplossen.
     headers.set('X-Final-Url', antwoord.url || doelUrl.toString());
-    headers.set('Access-Control-Expose-Headers', 'X-Final-Url');
+    headers.set('X-Upstream-Status', String(antwoord.status));
+    headers.set('Access-Control-Expose-Headers', 'X-Final-Url, X-Upstream-Status');
 
-    return new Response(antwoord.body, { status: antwoord.status, headers });
+    return new Response(body, { status: antwoord.status, headers });
   },
 };
 
